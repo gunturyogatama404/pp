@@ -1,0 +1,145 @@
+#!/bin/bash
+# castar =================================================================
+# Skrip Otomatisasi CastarSDK untuk Multi-IP
+# Versi: 1.0
+# Tanggal: 17 Juni 2025
+#
+# Deskripsi:
+# Skrip ini mengotomatiskan seluruh proses penyiapan CastarSDK
+# pada server dengan banyak alamat IP publik. Skrip ini akan:
+# 1. Memastikan Docker dan iptables terinstal.
+# 2. Mendeteksi semua alamat IP publik yang tersedia.
+# 3. Untuk setiap IP, membuat jaringan Docker terisolasi.
+# 4. Menambahkan aturan 'iptables' untuk merutekan lalu lintas keluar dari kontainer
+#    melalui alamat IP spesifik tersebut.
+# 5. Menjalankan kontainer CastarSDK pada jaringan yang sesuai.
+# ========================================================================
+
+# --- CARA PENGGUNAAN ---
+# 1. Ganti nilai 'CASTAR_SDK_KEY' dengan KEY dari akun CastarSDK Anda.
+# 2. Simpan skrip ini (misal: start_castar.sh).
+# 3. Beri izin eksekusi: chmod +x start_castar.sh
+# 4. Jalankan dengan hak akses root: sudo ./start_castar.sh
+# ————————————————————————————————
+
+# --- KONFIGURASI ---
+
+# -- Konfigurasi CastarSDK (WAJIB) --
+CASTAR_SDK_KEY="cskel5pSilLcQk"
+CASTAR_IMAGE="ghcr.io/adfly8470/castarsdk/castarsdk@sha256:881cdbe79f10dbfac65a1de0673587f67059b650f8cd94cd71801cc52a435f53"
+NAME_PREFIX="castar-cli"
+
+# -- Konfigurasi Umum --
+PLATFORM="linux/amd64" # Ubah ke "linux/arm64" jika perlu
+SUBNET_BASE="172.28"   # Menggunakan subnet berbeda untuk menghindari konflik
+
+# --- FUNGSI & EKSEKUSI UTAMA ---
+
+# Fungsi untuk cek dan install docker jika belum ada
+install_docker_if_needed() {
+    if ! command -v docker &> /dev/null; then
+        echo "[INFO] Docker tidak ditemukan. Menginstal Docker..."
+        apt-get update -y > /dev/null
+        apt-get install -y ca-certificates curl gnupg lsb-release iptables > /dev/null
+        mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+        apt-get update -y > /dev/null
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin > /dev/null
+        echo "[INFO] Docker berhasil diinstal."
+    else
+        echo "[INFO] Docker sudah terinstal."
+    fi
+}
+
+# Fungsi untuk membersihkan sumber daya lama (kontainer, jaringan, aturan iptables)
+cleanup_resources() {
+    local container_name=$1
+    echo "[INFO] Membersihkan sumber daya lama untuk $container_name..."
+    docker rm -f "$container_name" &> /dev/null
+    while iptables-save | grep -q -- "-m comment --comment $container_name"; do
+        local rule_to_delete=$(iptables-save | grep -- "-m comment --comment $container_name" | sed 's/^-A/-D/')
+        eval "iptables -t nat $rule_to_delete"
+    done
+    docker network rm "${container_name}-net" &> /dev/null
+}
+
+# --- EKSEKUSI UTAMA ---
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "[ERROR] Skrip ini harus dijalankan sebagai root atau dengan 'sudo'." >&2
+  exit 1
+fi
+
+if [ "$CASTAR_SDK_KEY" == "GANTI_DENGAN_KEY_ANDA" ]; then
+    echo "[ERROR] Harap edit skrip ini dan ganti nilai variabel CASTAR_SDK_KEY dengan KEY Anda."
+    exit 1
+fi
+
+install_docker_if_needed
+
+IP_LIST=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v -E '127\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|10\.')
+
+if [ -z "$IP_LIST" ]; then
+    echo "[PERINGATAN] Tidak ada alamat IP eksternal yang ditemukan. Skrip berhenti."
+    exit 1
+fi
+
+echo "[INFO] Ditemukan alamat IP berikut untuk diproses:"
+echo "$IP_LIST"
+echo "---"
+
+echo "[INFO] Menarik image Docker CastarSDK..."
+docker pull --platform "$PLATFORM" "$CASTAR_IMAGE" > /dev/null
+
+i=1
+for IP in $IP_LIST; do
+    CONTAINER_NAME="${NAME_PREFIX}-${i}"
+    NETWORK_NAME="${CONTAINER_NAME}-net"
+    SUBNET="${SUBNET_BASE}.${i}.0/24"
+
+    echo "=========================================================="
+    echo "[PROSES] Menyiapkan IP: $IP (Kontainer: $CONTAINER_NAME)"
+    echo "=========================================================="
+
+    cleanup_resources "$CONTAINER_NAME"
+
+    echo "[LANGKAH 1/3] Membuat jaringan Docker: $NETWORK_NAME dengan subnet: $SUBNET"
+    docker network create "$NETWORK_NAME" --driver bridge --subnet "$SUBNET"
+    if [ $? -ne 0 ]; then
+        echo "[ERROR] Gagal membuat jaringan Docker. Lanjut ke IP berikutnya."
+        continue
+    fi
+
+    echo "[LANGKAH 2/3] Menambahkan aturan iptables untuk merutekan lalu lintas via $IP"
+    iptables -t nat -I POSTROUTING -s "$SUBNET" -j SNAT --to-source "$IP" -m comment --comment "$CONTAINER_NAME"
+    if [ $? -ne 0 ]; then
+        echo "[ERROR] Gagal menambahkan aturan iptables. Membersihkan dan lanjut ke IP berikutnya."
+        docker network rm "$NETWORK_NAME"
+        continue
+    fi
+
+    echo "[LANGKAH 3/3] Menjalankan kontainer $CONTAINER_NAME..."
+    if ! docker run -d \
+        --name "$CONTAINER_NAME" \
+        --network "$NETWORK_NAME" \
+        --platform "$PLATFORM" \
+        --restart=always \
+        -e KEY="$CASTAR_SDK_KEY" \
+        "$CASTAR_IMAGE"; then
+        echo "[ERROR] Gagal memulai kontainer $CONTAINER_NAME pada IP $IP."
+    fi
+
+    ((i++))
+done
+
+echo ""
+echo "=========================================================="
+echo "[SELESAI] Semua kontainer CastarSDK telah disiapkan dan dijalankan."
+echo "Anda bisa memeriksa status dengan perintah: docker ps"
+echo ""
+echo "[PENTING!] Aturan iptables yang dibuat akan HILANG saat reboot."
+echo "Untuk membuatnya permanen (di Debian/Ubuntu), jalankan perintah berikut:"
+echo "sudo apt-get update && sudo apt-get install iptables-persistent -y"
+echo "sudo netfilter-persistent save"
+echo "=========================================================="
