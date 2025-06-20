@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # === KONFIGURASI ===
-INTERFACE="eth0"
 USERNAME="akirajie"
 PASSWORD="wildan123"
 PASSWD_FILE="/etc/squid/passwd"
@@ -10,14 +9,18 @@ MAX_TOTAL_PORTS=500
 MAX_PORT_PER_IP=3
 MIN_PORT_PER_IP=1
 
-# === AMBIL SEMUA IP PUBLIK DARI INTERFACE ===
+# === AMBIL SEMUA IP PUBLIK DARI SEMUA INTERFACE YANG AKTIF ===
 IPS=()
 while IFS= read -r ip; do
-    # Filter IP publik
     if [[ ! $ip =~ ^127\. && ! $ip =~ ^10\. && ! $ip =~ ^192\.168\. && ! $ip =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
         IPS+=("$ip")
     fi
-done < <(ip -4 addr show dev $INTERFACE | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | sort -u)
+done < <(ip -4 -o addr show up | awk '{print $4}' | cut -d/ -f1 | sort -u)
+
+if (( ${#IPS[@]} == 0 )); then
+    echo "❌ Tidak ditemukan IP publik. Pastikan interface aktif dan memiliki IP publik."
+    exit 1
+fi
 
 TOTAL_IPS=${#IPS[@]}
 MAX_POSSIBLE_PORTS=$((TOTAL_IPS * MAX_PORT_PER_IP))
@@ -50,7 +53,7 @@ for ip in "${IPS[@]}"; do
     ((PORT++))
 done
 
-# 2. Tambah port ke IP yang belum 2 (acak)
+# 2. Tambah port ke IP yang belum mencapai batas
 NEED_EXTRA=$((TOTAL_PORTS - ${#PORT_LIST[@]}))
 if (( NEED_EXTRA > 0 )); then
     SHUFFLED_IPS=( $(shuf -e "${IPS[@]}") )
@@ -79,11 +82,10 @@ http_access allow authenticated
 http_access deny all
 access_log /var/log/squid/access.log
 cache_log /var/log/squid/cache.log
-logfile_rotate 0
+logfile_rotate 10
 buffered_logs on
 dns_v4_first on
 visible_hostname proxy.local
-http_port 3128
 EOF
 
 for entry in "${PORT_LIST[@]}"; do
@@ -101,10 +103,11 @@ systemctl restart squid
 if systemctl is-active --quiet squid; then
     echo "✅ Squid berjalan!"
 else
-    echo "❌ Squid gagal jalan, cek dengan: journalctl -xe"
+    echo "❌ Squid gagal jalan, cek log dengan: journalctl -xe"
 fi
 
 # === OUTPUT FILE ===
+[ -f proxies.txt ] && mv proxies.txt proxies_backup_$(date +%F-%H%M%S).txt
 > proxies.txt
 for entry in "${PORT_LIST[@]}"; do
     ip="${entry%%:*}"
