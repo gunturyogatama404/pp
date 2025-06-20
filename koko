@@ -1,0 +1,97 @@
+#!/bin/bash
+set -e
+
+# === Buat IP Whitelist untuk Squid ===
+sudo tee /etc/squid/ip_whitelist.txt > /dev/null <<EOF
+151.106.6.79
+134.119.219.211
+134.119.214.69
+134.119.213.231
+134.119.207.29
+134.119.205.55
+92.204.241.167
+138.201.127.230
+136.243.177.154
+138.201.33.154
+138.201.62.169
+89.38.99.47
+109.236.84.70
+93.190.142.109
+89.39.104.152
+62.112.11.77
+217.23.5.66
+62.112.11.191
+93.190.142.89
+190.2.134.118
+178.132.5.24
+190.2.143.237
+89.38.98.64
+178.132.0.94
+91.232.105.90
+93.190.139.87
+178.132.2.28
+93.190.139.245
+93.190.139.73
+89.39.107.139
+93.190.141.108
+93.190.141.73
+185.165.241.5
+175.110.113.241
+185.100.232.132
+80.79.6.171
+185.132.133.56
+175.110.115.54
+175.110.113.246
+175.110.113.245
+185.165.240.228
+175.110.113.94
+185.100.232.163
+175.110.113.236
+190.2.142.111
+190.2.142.30
+190.2.150.45
+185.185.51.65
+175.110.113.229
+185.132.133.127
+190.2.142.72
+185.132.176.18
+87.119.220.229
+92.42.106.91
+134.119.205.91
+176.114.85.151
+EOF
+
+# Tambahkan konfigurasi ke squid.conf
+sudo tee -a /etc/squid/squid.conf > /dev/null <<EOF
+
+# IP Whitelist
+acl allowed_ips src "/etc/squid/ip_whitelist.txt"
+http_access allow allowed_ips
+http_access deny all
+EOF
+
+echo "✅ IP whitelist berhasil diterapkan."
+
+# === Buat override systemd untuk Squid agar limit file descriptor naik ===
+sudo mkdir -p /etc/systemd/system/squid.service.d
+
+sudo tee /etc/systemd/system/squid.service.d/override.conf > /dev/null <<EOF
+[Service]
+LimitNOFILE=65535
+EOF
+
+echo "✅ Override systemd untuk limit file descriptor dibuat."
+
+# Reload systemd dan restart Squid
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl restart squid
+
+echo "✅ Squid berhasil direstart."
+
+# Tampilkan limit file descriptor Squid sekarang
+echo "Cek limit file descriptor Squid:"
+cat /proc/$(pidof squid)/limits | grep "Max open files"
+
+# install nload
+apt install nload
