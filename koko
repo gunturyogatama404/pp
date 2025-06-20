@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # === Buat IP Whitelist untuk Squid ===
 sudo tee /etc/squid/ip_whitelist.txt > /dev/null <<EOF
@@ -61,16 +61,19 @@ sudo tee /etc/squid/ip_whitelist.txt > /dev/null <<EOF
 176.114.85.151
 EOF
 
-# Tambahkan konfigurasi ke squid.conf
-sudo tee -a /etc/squid/squid.conf > /dev/null <<EOF
+# Tambahkan konfigurasi ACL hanya jika belum ada
+if ! grep -q "acl allowed_ips" /etc/squid/squid.conf; then
+  sudo tee -a /etc/squid/squid.conf > /dev/null <<EOF
 
 # IP Whitelist
 acl allowed_ips src "/etc/squid/ip_whitelist.txt"
 http_access allow allowed_ips
 http_access deny all
 EOF
-
-echo "✅ IP whitelist berhasil diterapkan."
+  echo "✅ Konfigurasi whitelist ditambahkan ke squid.conf."
+else
+  echo "⚠️  Konfigurasi whitelist sudah ada di squid.conf, dilewati."
+fi
 
 # === Buat override systemd untuk Squid agar limit file descriptor naik ===
 sudo mkdir -p /etc/systemd/system/squid.service.d
@@ -89,9 +92,17 @@ sudo systemctl restart squid
 
 echo "✅ Squid berhasil direstart."
 
-# Tampilkan limit file descriptor Squid sekarang
-echo "Cek limit file descriptor Squid:"
-cat /proc/$(pidof squid)/limits | grep "Max open files"
+# Cek limit file descriptor Squid dengan aman
+echo "🔍 Mengecek limit file descriptor Squid..."
+for pid in $(pidof squid); do
+  if [ -f "/proc/$pid/limits" ]; then
+    echo "🔹 PID $pid:"
+    cat /proc/$pid/limits | grep "Max open files"
+  else
+    echo "❌ PID $pid tidak memiliki file limits (mungkin sudah mati)."
+  fi
+done
 
-# install nload
-apt install nload
+# Install nload (monitor jaringan)
+sudo apt update
+sudo apt install -y nload
