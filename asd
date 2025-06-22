@@ -116,3 +116,15 @@ for entry in "${PORT_LIST[@]}"; do
 done
 
 echo "✅ proxies.txt selesai dibuat dengan total ${#PORT_LIST[@]} port"
+
+# === AUTORESTART SQUID TIAP 12 JAM ===
+CRON_FILE="/etc/cron.d/squid-autorestart"
+
+cat > "$CRON_FILE" <<EOF
+SHELL=/bin/bash
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+0 */12 * * * root systemctl restart squid
+EOF
+
+chmod 644 "$CRON_FILE"
+echo "🕒 Cron job dibuat di $CRON_FILE untuk restart Squid setiap 12 jam."
