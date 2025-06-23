@@ -23,7 +23,7 @@
 
 # --- KONFIGURASI ---
 # WAJIB: Ganti dengan token Anda dari dashboard Traffmonetizer
-AUTH_KEY="GANTI_DENGAN_TOKEN_ANDA"
+AUTH_KEY="yxJ+/sZpOy5mP/VdagnR2kqgsa9o0krCw+Uc/XZnlgE="
 
 # Nama image Docker yang akan digunakan
 IMAGE="traffmonetizer/cli_v2:latest"
