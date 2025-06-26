@@ -4,7 +4,7 @@
 USERNAME="akirajie"
 PASSWORD="wildan123"
 BASE_PORT=20000
-PORT_PER_IP=100  # Aman untuk 1 vCPU 1GB RAM
+PORT_PER_IP=100
 CONF_FILE="/etc/danted.conf"
 BOT_TOKEN="5036251543:AAGRL744DTTLaaoZQz2kRz_2jNrmFowJgzM"
 CHAT_ID="516489996"
@@ -14,7 +14,7 @@ apt update -y
 apt install -y dante-server curl whois net-tools
 
 # === BUAT USER ===
-useradd -M -s /usr/sbin/nologin $USERNAME || true
+useradd -M -s /usr/sbin/nologin "$USERNAME" || true
 echo "$USERNAME:$PASSWORD" | chpasswd
 
 # === DETEKSI IP PUBLIK ===
@@ -26,18 +26,15 @@ while IFS= read -r ip; do
 done < <(ip -4 -o addr show up | awk '{print $4}' | cut -d/ -f1 | sort -u)
 
 if (( ${#IPS[@]} == 0 )); then
-    echo "❌ Tidak ditemukan IP publik."
+    echo "❌ Tidak ada IP publik terdeteksi!"
     exit 1
 fi
 
-TOTAL_IPS=${#IPS[@]}
-TOTAL_PORTS=$((TOTAL_IPS * PORT_PER_IP))
-
-# === HAPUS KONFIGURASI LAMA ===
+# === HAPUS FILE LAMA ===
 rm -f "$CONF_FILE"
 > proxies.txt
 
-# === BUAT KONFIGURASI DASAR DANTED ===
+# === HEADER KONFIGURASI ===
 cat > "$CONF_FILE" <<EOF
 logoutput: /dev/null
 user.privileged: root
@@ -47,10 +44,10 @@ clientmethod: none
 socksmethod: username
 EOF
 
-# === LOOP IP & PORT ===
+# === BUAT KONFIGURASI PER IP ===
 PORT=$BASE_PORT
 for ip in "${IPS[@]}"; do
-    for ((i=0; i<PORT_PER_IP; i++)); do
+    for ((i = 0; i < PORT_PER_IP; i++)); do
         echo "internal: $ip port = $PORT" >> "$CONF_FILE"
         echo "external: $ip" >> "$CONF_FILE"
         echo "socksmethod: username" >> "$CONF_FILE"
@@ -73,7 +70,7 @@ cat > /etc/systemd/system/danted.service.d/limit.conf <<EOF
 LimitNOFILE=65535
 EOF
 
-# === ENABLE & RESTART DANTE ===
+# === RESTART DANTE ===
 systemctl daemon-reexec
 systemctl restart danted
 systemctl enable danted
@@ -88,5 +85,5 @@ curl -s -F document=@"$FILENAME" "https://api.telegram.org/bot$BOT_TOKEN/sendDoc
     && echo "✅ Dikirim ke Telegram: $FILENAME" \
     || echo "❌ Gagal upload ke Telegram."
 
-echo "✅ Total IP terdeteksi: $TOTAL_IPS"
-echo "✅ Total SOCKS5 proxy dibuat: $TOTAL_PORTS"
+echo "✅ Total IP: ${#IPS[@]}"
+echo "✅ Total SOCKS5 proxy: $(( ${#IPS[@]} * PORT_PER_IP ))"
