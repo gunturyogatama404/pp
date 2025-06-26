@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# === KONFIGURASI ===
+USERNAME="akirajie"
+PASSWORD="wildan123"
+BASE_PORT=20000
+PORT_PER_IP=100  # Aman untuk 1 vCPU 1GB RAM
+CONF_FILE="/etc/danted.conf"
+BOT_TOKEN="5036251543:AAGRL744DTTLaaoZQz2kRz_2jNrmFowJgzM"
+CHAT_ID="516489996"
+
+# === INSTALL DEPENDENSI ===
+apt update -y
+apt install -y dante-server curl whois net-tools
+
+# === BUAT USER ===
+useradd -M -s /usr/sbin/nologin $USERNAME || true
+echo "$USERNAME:$PASSWORD" | chpasswd
+
+# === DETEKSI IP PUBLIK ===
+IPS=()
+while IFS= read -r ip; do
+    if [[ ! $ip =~ ^127\. && ! $ip =~ ^10\. && ! $ip =~ ^192\.168\. && ! $ip =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+        IPS+=("$ip")
+    fi
+done < <(ip -4 -o addr show up | awk '{print $4}' | cut -d/ -f1 | sort -u)
+
+if (( ${#IPS[@]} == 0 )); then
+    echo "❌ Tidak ditemukan IP publik."
+    exit 1
+fi
+
+TOTAL_IPS=${#IPS[@]}
+TOTAL_PORTS=$((TOTAL_IPS * PORT_PER_IP))
+
+# === GENERATE KONFIGURASI DANTED ===
+cat > "$CONF_FILE" <<EOF
+logoutput: /var/log/danted.log
+user.privileged: root
+user.notprivileged: nobody
+user.libwrap: nobody
+clientmethod: username
+socksmethod: username
+EOF
+
+PORT=$BASE_PORT
+> proxies.txt
+
+for ip in "${IPS[@]}"; do
+    for ((i=0; i<PORT_PER_IP; i++)); do
+        echo "internal: $ip port = $PORT" >> "$CONF_FILE"
+        echo "external: $ip" >> "$CONF_FILE"
+        echo "pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    protocol: tcp udp
+    log: connect disconnect error
+    method: username
+    clientmethod: username
+    port = $PORT
+}" >> "$CONF_FILE"
+        echo "socks5://$USERNAME:$PASSWORD@$ip:$PORT" >> proxies.txt
+        ((PORT++))
+    done
+done
+
+# === SET LIMIT FILE DESCRIPTOR ===
+mkdir -p /etc/systemd/system/danted.service.d
+cat > /etc/systemd/system/danted.service.d/limit.conf <<EOF
+[Service]
+LimitNOFILE=65535
+EOF
+
+# === ENABLE & RESTART DANTE ===
+systemctl daemon-reexec
+systemctl restart danted
+systemctl enable danted
+
+# === AUTORESTART 12 JAM ===
+echo "0 */12 * * * root systemctl restart danted" > /etc/cron.d/dante-autorestart
+
+# === KIRIM KE TELEGRAM ===
+FILENAME="socks5-$(hostname)-$(date +%F-%H%M).txt"
+mv proxies.txt "$FILENAME"
+curl -s -F document=@"$FILENAME" "https://api.telegram.org/bot$BOT_TOKEN/sendDocument?chat_id=$CHAT_ID" \
+    && echo "✅ Dikirim ke Telegram: $FILENAME" \
+    || echo "❌ Gagal upload ke Telegram."
+
+echo "✅ Total IP terdeteksi: $TOTAL_IPS"
+echo "✅ Total SOCKS5 proxy dibuat: $TOTAL_PORTS"
