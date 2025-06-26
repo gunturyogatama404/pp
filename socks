@@ -26,15 +26,18 @@ while IFS= read -r ip; do
 done < <(ip -4 -o addr show up | awk '{print $4}' | cut -d/ -f1 | sort -u)
 
 if (( ${#IPS[@]} == 0 )); then
-    echo "❌ Tidak ada IP publik terdeteksi!"
+    echo "❌ Tidak ditemukan IP publik."
     exit 1
 fi
 
-# === HAPUS FILE LAMA ===
+TOTAL_IPS=${#IPS[@]}
+TOTAL_PORTS=$((TOTAL_IPS * PORT_PER_IP))
+
+# === HAPUS KONFIGURASI LAMA ===
 rm -f "$CONF_FILE"
 > proxies.txt
 
-# === HEADER KONFIGURASI ===
+# === BUAT HEADER KONFIGURASI ===
 cat > "$CONF_FILE" <<EOF
 logoutput: /dev/null
 user.privileged: root
@@ -44,20 +47,24 @@ clientmethod: none
 socksmethod: username
 EOF
 
-# === BUAT KONFIGURASI PER IP ===
+# === GENERATE BLOK PER IP/PORT ===
 PORT=$BASE_PORT
 for ip in "${IPS[@]}"; do
     for ((i = 0; i < PORT_PER_IP; i++)); do
-        echo "internal: $ip port = $PORT" >> "$CONF_FILE"
-        echo "external: $ip" >> "$CONF_FILE"
-        echo "socksmethod: username" >> "$CONF_FILE"
-        echo "pass {
+        cat >> "$CONF_FILE" <<EOF
+
+internal: $ip port = $PORT
+external: $ip
+socksmethod: username
+
+pass {
     from: 0.0.0.0/0 to: 0.0.0.0/0
     protocol: tcp udp
     log: connect disconnect error
     method: username
     port = $PORT
-}" >> "$CONF_FILE"
+}
+EOF
         echo "socks5://$USERNAME:$PASSWORD@$ip:$PORT" >> proxies.txt
         ((PORT++))
     done
@@ -70,12 +77,12 @@ cat > /etc/systemd/system/danted.service.d/limit.conf <<EOF
 LimitNOFILE=65535
 EOF
 
-# === RESTART DANTE ===
+# === ENABLE & RESTART DANTE ===
 systemctl daemon-reexec
 systemctl restart danted
 systemctl enable danted
 
-# === AUTORESTART TIAP 12 JAM ===
+# === AUTORESTART 12 JAM ===
 echo "0 */12 * * * root systemctl restart danted" > /etc/cron.d/dante-autorestart
 
 # === KIRIM KE TELEGRAM ===
@@ -85,5 +92,5 @@ curl -s -F document=@"$FILENAME" "https://api.telegram.org/bot$BOT_TOKEN/sendDoc
     && echo "✅ Dikirim ke Telegram: $FILENAME" \
     || echo "❌ Gagal upload ke Telegram."
 
-echo "✅ Total IP: ${#IPS[@]}"
-echo "✅ Total SOCKS5 proxy: $(( ${#IPS[@]} * PORT_PER_IP ))"
+echo "✅ Total IP: $TOTAL_IPS"
+echo "✅ Total SOCKS5 proxy: $TOTAL_PORTS"
