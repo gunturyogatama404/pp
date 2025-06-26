@@ -33,29 +33,32 @@ fi
 TOTAL_IPS=${#IPS[@]}
 TOTAL_PORTS=$((TOTAL_IPS * PORT_PER_IP))
 
-# === GENERATE KONFIGURASI DANTED ===
+# === HAPUS KONFIGURASI LAMA ===
+rm -f "$CONF_FILE"
+> proxies.txt
+
+# === BUAT KONFIGURASI DASAR DANTED ===
 cat > "$CONF_FILE" <<EOF
-logoutput: /var/log/danted.log
+logoutput: /dev/null
 user.privileged: root
 user.notprivileged: nobody
 user.libwrap: nobody
-clientmethod: username
+clientmethod: none
 socksmethod: username
 EOF
 
+# === LOOP IP & PORT ===
 PORT=$BASE_PORT
-> proxies.txt
-
 for ip in "${IPS[@]}"; do
     for ((i=0; i<PORT_PER_IP; i++)); do
         echo "internal: $ip port = $PORT" >> "$CONF_FILE"
         echo "external: $ip" >> "$CONF_FILE"
+        echo "socksmethod: username" >> "$CONF_FILE"
         echo "pass {
     from: 0.0.0.0/0 to: 0.0.0.0/0
     protocol: tcp udp
     log: connect disconnect error
     method: username
-    clientmethod: username
     port = $PORT
 }" >> "$CONF_FILE"
         echo "socks5://$USERNAME:$PASSWORD@$ip:$PORT" >> proxies.txt
@@ -75,7 +78,7 @@ systemctl daemon-reexec
 systemctl restart danted
 systemctl enable danted
 
-# === AUTORESTART 12 JAM ===
+# === AUTORESTART TIAP 12 JAM ===
 echo "0 */12 * * * root systemctl restart danted" > /etc/cron.d/dante-autorestart
 
 # === KIRIM KE TELEGRAM ===
