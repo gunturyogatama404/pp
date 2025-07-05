@@ -25,7 +25,7 @@
 # --- KONFIGURASI ---
 # WAJIB: Ganti dengan kredensial akun UpRock Anda
 USER_AUTH="gunturyogatamafebriadi@gmail.com"
-PASSWORD="wildan123@GF"
+PASSWORD="Wildan123@GF"
 
 # Nama image Docker yang akan digunakan
 IMAGE="ghcr.io/techroy23/docker-urnetwork:latest"
